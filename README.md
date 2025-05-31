@@ -6,6 +6,7 @@ A modern, full-stack web application that uses DeepSeek's LLM to generate engagi
 
 - 🤖 **AI-Powered Storytelling**: Leverages DeepSeek's advanced language model
 - 📚 **Chapter Management**: Automatically organizes stories into chapters with summaries
+- 🔒 **Password Protection**: Secure your private stories with password protection
 - 🎨 **Modern UI**: Beautiful, responsive design with Tailwind CSS
 - 💾 **Story Persistence**: SQLite database for reliable story storage
 - 🔄 **Context Awareness**: Maintains story context across chapters
@@ -151,11 +152,19 @@ deepscribe/
 
 ## API Endpoints
 
-- `GET /api/stories` - Get all stories
-- `GET /api/stories/:id` - Get story with chapters
-- `POST /api/stories` - Create new story
-- `POST /api/stories/:id/chapters` - Generate new chapter
-- `DELETE /api/stories/:id` - Delete story
+### Stories
+- `GET /deepscribe/api/stories` - Get all stories (basic info only)
+- `GET /deepscribe/api/stories/:id` - Get story with chapters (or password prompt)
+- `POST /deepscribe/api/stories` - Create new story
+- `DELETE /deepscribe/api/stories/:id` - Delete story
+
+### Password Protection
+- `POST /deepscribe/api/stories/:id/password` - Set password for story
+- `POST /deepscribe/api/stories/:id/verify` - Verify password and get full story
+- `DELETE /deepscribe/api/stories/:id/password` - Remove password protection
+
+### Chapters
+- `POST /deepscribe/api/stories/:id/chapters` - Generate new chapter (requires password if protected)
 
 ## Environment Variables
 
@@ -221,3 +230,23 @@ For issues and questions:
 ---
 
 Made with ❤️ using DeepSeek AI and modern web technologies. 
+
+## Password Protection
+
+### Setting Password Protection
+
+1. **From the Stories List**: Click the "Protect" button on any unprotected story
+2. **Set Password**: Enter a password (minimum 4 characters) 
+3. **Confirmation**: The story will now show a lock icon and require password access
+
+### Accessing Protected Stories
+
+1. **Click on Protected Story**: You'll be prompted for the password
+2. **Enter Password**: Provide the correct password to unlock the story
+3. **Continue Writing**: Once unlocked, you can read and continue the story normally
+
+### Security Features
+
+- **Password Hashing**: All passwords are securely hashed using PBKDF2
+- **Session Persistence**: Password remains valid during your session
+- **No Backdoors**: Only the correct password can unlock protected stories 

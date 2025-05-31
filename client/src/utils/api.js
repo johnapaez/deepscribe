@@ -25,12 +25,24 @@ export const storyAPI = {
   // Get story by ID with chapters
   getStory: (id) => api.get(`/stories/${id}`),
 
+  // Verify story password and get full story data
+  verifyStoryPassword: (id, password) => 
+    api.post(`/stories/${id}/verify`, { password }),
+
+  // Set password for a story
+  setStoryPassword: (id, password) => 
+    api.post(`/stories/${id}/password`, { password }),
+
+  // Remove password protection from a story
+  removeStoryPassword: (id, password) => 
+    api.delete(`/stories/${id}/password`, { data: { password } }),
+
   // Create new story
   createStory: (data) => api.post('/stories', data),
 
   // Generate new chapter
-  generateChapter: (storyId, prompt) => 
-    api.post(`/stories/${storyId}/chapters`, { prompt }),
+  generateChapter: (storyId, prompt, password = null) => 
+    api.post(`/stories/${storyId}/chapters`, { prompt, password }),
 
   // Delete story
   deleteStory: (id) => api.delete(`/stories/${id}`),

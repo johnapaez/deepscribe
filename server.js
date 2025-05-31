@@ -8,6 +8,7 @@ import sqlite3 from 'sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import rateLimit from 'express-rate-limit';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -26,6 +27,8 @@ db.serialize(() => {
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     genre TEXT,
+    password_hash TEXT,
+    is_protected INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     status TEXT DEFAULT 'active'
@@ -41,7 +44,25 @@ db.serialize(() => {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (story_id) REFERENCES stories (id)
   )`);
+
+  // Add password protection columns if they don't exist (for existing databases)
+  db.run(`ALTER TABLE stories ADD COLUMN password_hash TEXT`, () => {});
+  db.run(`ALTER TABLE stories ADD COLUMN is_protected INTEGER DEFAULT 0`, () => {});
 });
+
+// Password hashing utilities
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, hashedPassword) {
+  if (!hashedPassword) return false;
+  const [salt, hash] = hashedPassword.split(':');
+  const verifyHash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
+  return hash === verifyHash;
+}
 
 // Rate limiting
 const limiter = rateLimit({
@@ -167,10 +188,10 @@ async function generateChapterSummary(content) {
 
 // API Routes
 
-// Get all stories
+// Get all stories (without sensitive data)
 app.get('/deepscribe/api/stories', (req, res) => {
   db.all(
-    'SELECT * FROM stories ORDER BY updated_at DESC',
+    'SELECT id, title, genre, is_protected, created_at, updated_at, status FROM stories ORDER BY updated_at DESC',
     (err, rows) => {
       if (err) {
         res.status(500).json({ error: 'Database error' });
@@ -181,7 +202,7 @@ app.get('/deepscribe/api/stories', (req, res) => {
   );
 });
 
-// Get story by ID with chapters
+// Get story by ID with chapters (requires password if protected)
 app.get('/deepscribe/api/stories/:id', (req, res) => {
   const storyId = req.params.id;
   
@@ -196,6 +217,23 @@ app.get('/deepscribe/api/stories/:id', (req, res) => {
       return;
     }
 
+    // If story is protected, don't return content without password verification
+    if (story.is_protected) {
+      res.status(403).json({ 
+        error: 'Story is password protected',
+        requiresPassword: true,
+        story: {
+          id: story.id,
+          title: story.title,
+          genre: story.genre,
+          is_protected: story.is_protected,
+          created_at: story.created_at,
+          updated_at: story.updated_at
+        }
+      });
+      return;
+    }
+
     db.all(
       'SELECT * FROM chapters WHERE story_id = ? ORDER BY chapter_number',
       [storyId],
@@ -206,6 +244,117 @@ app.get('/deepscribe/api/stories/:id', (req, res) => {
         }
         
         res.json({ ...story, chapters });
+      }
+    );
+  });
+});
+
+// Verify story password and get full story data
+app.post('/deepscribe/api/stories/:id/verify', (req, res) => {
+  const storyId = req.params.id;
+  const { password } = req.body;
+
+  if (!password) {
+    return res.status(400).json({ error: 'Password is required' });
+  }
+
+  db.get('SELECT * FROM stories WHERE id = ?', [storyId], (err, story) => {
+    if (err) {
+      res.status(500).json({ error: 'Database error' });
+      return;
+    }
+    
+    if (!story) {
+      res.status(404).json({ error: 'Story not found' });
+      return;
+    }
+
+    if (!story.is_protected || !verifyPassword(password, story.password_hash)) {
+      res.status(401).json({ error: 'Invalid password' });
+      return;
+    }
+
+    // Password is correct, return full story data
+    db.all(
+      'SELECT * FROM chapters WHERE story_id = ? ORDER BY chapter_number',
+      [storyId],
+      (err, chapters) => {
+        if (err) {
+          res.status(500).json({ error: 'Database error' });
+          return;
+        }
+        
+        // Remove password hash from response
+        const { password_hash, ...storyData } = story;
+        res.json({ ...storyData, chapters });
+      }
+    );
+  });
+});
+
+// Set password for a story
+app.post('/deepscribe/api/stories/:id/password', (req, res) => {
+  const storyId = req.params.id;
+  const { password } = req.body;
+
+  if (!password || password.length < 4) {
+    return res.status(400).json({ error: 'Password must be at least 4 characters long' });
+  }
+
+  const passwordHash = hashPassword(password);
+
+  db.run(
+    'UPDATE stories SET password_hash = ?, is_protected = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    [passwordHash, storyId],
+    function(err) {
+      if (err) {
+        res.status(500).json({ error: 'Database error' });
+        return;
+      }
+
+      if (this.changes === 0) {
+        res.status(404).json({ error: 'Story not found' });
+        return;
+      }
+      
+      res.json({ message: 'Password set successfully' });
+    }
+  );
+});
+
+// Remove password protection from a story
+app.delete('/deepscribe/api/stories/:id/password', (req, res) => {
+  const storyId = req.params.id;
+  const { password } = req.body;
+
+  // First verify the current password
+  db.get('SELECT password_hash FROM stories WHERE id = ?', [storyId], (err, story) => {
+    if (err) {
+      res.status(500).json({ error: 'Database error' });
+      return;
+    }
+    
+    if (!story) {
+      res.status(404).json({ error: 'Story not found' });
+      return;
+    }
+
+    if (!verifyPassword(password, story.password_hash)) {
+      res.status(401).json({ error: 'Invalid password' });
+      return;
+    }
+
+    // Password verified, remove protection
+    db.run(
+      'UPDATE stories SET password_hash = NULL, is_protected = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [storyId],
+      function(err) {
+        if (err) {
+          res.status(500).json({ error: 'Database error' });
+          return;
+        }
+        
+        res.json({ message: 'Password protection removed' });
       }
     );
   });
@@ -225,18 +374,18 @@ app.post('/deepscribe/api/stories', (req, res) => {
         return;
       }
       
-      res.json({ id: storyId, title, genre });
+      res.json({ id: storyId, title, genre, is_protected: 0 });
     }
   );
 });
 
-// Generate new chapter
+// Generate new chapter (requires password if story is protected)
 app.post('/deepscribe/api/stories/:id/chapters', async (req, res) => {
   const storyId = req.params.id;
-  const { prompt } = req.body;
+  const { prompt, password } = req.body;
 
   try {
-    // Get story and existing chapters for context
+    // Get story and verify access
     const story = await new Promise((resolve, reject) => {
       db.get('SELECT * FROM stories WHERE id = ?', [storyId], (err, row) => {
         if (err) reject(err);
@@ -246,6 +395,11 @@ app.post('/deepscribe/api/stories/:id/chapters', async (req, res) => {
 
     if (!story) {
       return res.status(404).json({ error: 'Story not found' });
+    }
+
+    // Check password if story is protected
+    if (story.is_protected && !verifyPassword(password, story.password_hash)) {
+      return res.status(401).json({ error: 'Invalid password' });
     }
 
     const chapters = await new Promise((resolve, reject) => {
