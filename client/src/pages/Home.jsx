@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, BookOpen, Calendar, Trash2, Eye, Lock, LockOpen, Shield } from 'lucide-react';
+import { Plus, BookOpen, Calendar, Trash2, Eye, Lock, Unlock, Shield } from 'lucide-react';
 import { storyAPI } from '../utils/api';
 import toast from 'react-hot-toast';
 
@@ -144,7 +144,7 @@ function Home() {
                     {story.is_protected ? (
                       <Lock className="h-4 w-4 text-amber-500 flex-shrink-0" title="Password protected" />
                     ) : (
-                      <LockOpen className="h-4 w-4 text-gray-400 flex-shrink-0" title="Not protected" />
+                      <Unlock className="h-4 w-4 text-gray-400 flex-shrink-0" title="Not protected" />
                     )}
                   </div>
                   {story.genre && (
